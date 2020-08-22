@@ -8,6 +8,7 @@ import numpy.random as npr
 import sys
 import json
 import cv2
+import glob
 
 import pdb
 
@@ -42,8 +43,8 @@ class visual_genome(data.Dataset):
         self.word2idx[self.unknown_token] = dict_len
         self.word2idx[self.start_token] = dict_len + 1
         self.word2idx[self.end_token] = dict_len + 2
-        self.voc_sign = {'start': self.word2idx[self.start_token], 
-                         'null': self.word2idx[self.unknown_token], 
+        self.voc_sign = {'start': self.word2idx[self.start_token],
+                         'null': self.word2idx[self.unknown_token],
                          'end': self.word2idx[self.end_token]}
 
         self._object_classes = tuple(['__background__'] + cats['object'])
@@ -60,11 +61,11 @@ class visual_genome(data.Dataset):
             self.inverse_weight_predicate[idx] = inverse_weight['predicate'][self._predicate_classes[idx]]
         self.inverse_weight_predicate = self.inverse_weight_predicate / self.inverse_weight_predicate.min()
         # print self.inverse_weight_predicate
-        ann_file_name = {'vg_normal_train': 'train.json', 
-                           'vg_normal_test': 'test.json', 
-                           'vg_small_train': 'train_small.json', 
-                           'vg_small_test': 'test_small.json', 
-                           'vg_fat_train': 'train_fat.json', 
+        ann_file_name = {'vg_normal_train': 'train.json',
+                           'vg_normal_test': 'test.json',
+                           'vg_small_train': 'train_small.json',
+                           'vg_small_test': 'test_small.json',
+                           'vg_fat_train': 'train_fat.json',
                            'vg_fat_test': 'test_small.json'}
 
         ann_file_path = osp.join(annotation_dir, ann_file_name[self.name])
@@ -97,8 +98,8 @@ class visual_genome(data.Dataset):
         gt_boxes_object[:, 0:4] = torch.FloatTensor([obj['box'] for obj in _annotation['objects']]) * im_scale
         gt_boxes_region[:, 0:4] = torch.FloatTensor([reg['box'] for reg in _annotation['regions']]) * im_scale
         gt_boxes_object[:, 4]   = torch.FloatTensor([obj['class'] for obj in _annotation['objects']])
-        gt_boxes_region[:, 4:]  = torch.FloatTensor([np.pad(reg['phrase'], 
-                                    (0,self.max_size-len(reg['phrase'])),'constant',constant_values=self.voc_sign['end']) 
+        gt_boxes_region[:, 4:]  = torch.FloatTensor([np.pad(reg['phrase'],
+                                    (0,self.max_size-len(reg['phrase'])),'constant',constant_values=self.voc_sign['end'])
                                         for reg in _annotation['regions']])
 
         gt_relationships = torch.zeros(len(_annotation['objects']), (len(_annotation['objects']))).type(torch.LongTensor)
@@ -228,3 +229,50 @@ class visual_genome(data.Dataset):
     @property
     def predicate_classes(self):
         return self._predicate_classes
+
+
+class prepare_image(data.Dataset):
+    def __init__(self, datapath):
+        self._data_path = datapath
+        self.img_list = glob.glob(os.path.join(datapath, '*.jpg'))
+
+        # image transformation
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        self.transform = transforms.Compose([
+                transforms.ToTensor(),
+                normalize,
+            ])
+
+    def __getitem__(self, index):
+        # Sample random scales to use for each image in this batch
+        target_scale = cfg.TRAIN.SCALES[npr.randint(0, high=len(cfg.TRAIN.SCALES))]
+        img = cv2.imread(self.img_list[index])
+        img, im_scale = self._image_resize(img, target_scale, cfg.TRAIN.MAX_SIZE)
+        im_info = np.array([img.shape[0], img.shape[1], im_scale], dtype=np.float32)
+        im_name = self.img_list[index]
+        im_name = im_name.split('.')[0]
+        img = Image.fromarray(img)
+
+        if self.transform is not None:
+            img = self.transform(img)
+
+        return img, im_info, im_name
+
+    def __len__(self):
+        return len(self.img_list)
+
+    def _image_resize(self, im, target_size, max_size):
+        """Builds an input blob from the images in the roidb at the specified
+        scales.
+        """
+        im_shape = im.shape
+        im_size_min = np.min(im_shape[0:2])
+        im_size_max = np.max(im_shape[0:2])
+        im_scale = float(target_size) / float(im_size_min)
+        # Prevent the biggest axis from being more than MAX_SIZE
+        if np.round(im_scale * im_size_max) > max_size:
+            im_scale = float(max_size) / float(im_size_max)
+        im = cv2.resize(im, None, None, fx=im_scale, fy=im_scale,
+                        interpolation=cv2.INTER_LINEAR)
+
+        return im, im_scale

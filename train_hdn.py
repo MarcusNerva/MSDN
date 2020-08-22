@@ -13,7 +13,7 @@ from faster_rcnn import network
 from faster_rcnn.MSDN import Hierarchical_Descriptive_Model
 from faster_rcnn.utils.timer import Timer
 from faster_rcnn.fast_rcnn.config import cfg
-from faster_rcnn.datasets.visual_genome_loader import visual_genome
+from faster_rcnn.datasets.visual_genome_loader import visual_genome, prepare_image
 from faster_rcnn.utils.HDN_utils import get_model_name, group_features
 
 import pdb
@@ -61,7 +61,8 @@ parser.add_argument('--model_name', type=str, default='HDN', help='The name for 
 parser.add_argument('--nesterov', action='store_true', help='Set to use the nesterov for SGD')
 parser.add_argument('--finetune_language_model', action='store_true', help='Set to disable the update of other parameters')
 parser.add_argument('--optimizer', type=int, default=0, help='which optimizer used for optimize language model [0: SGD | 1: Adam | 2: Adagrad]')
-
+parser.add_argument('--total_images_dir', type=str, default='/disks/lilaoshi666/hanhua.ye/MSDN/MSRVTT_image')
+parser.add_argument('--total_feature_dir', type=str, default='/disks/lilaoshi666/hanhua.ye/MSDN/features')
 
 parser.add_argument('--evaluate', action='store_true', help='Only use the testing mode')
 args = parser.parse_args()
@@ -87,25 +88,29 @@ def main():
     torch.manual_seed(args.seed + 1)
     torch.cuda.manual_seed(args.seed + 2)
 
-    print("Loading training set and testing set..."),
-    train_set = visual_genome(args.dataset_option, 'train')
-    test_set = visual_genome('small', 'test')
-    print("Done.")
+    # print("Loading training set and testing set..."),
+    # train_set = visual_genome(args.dataset_option, 'train')
+    # test_set = visual_genome('small', 'test')
 
-    train_loader = torch.utils.data.DataLoader(train_set, batch_size=1, shuffle=True, num_workers=8, pin_memory=True)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=1, shuffle=False, num_workers=8, pin_memory=True)
+    # print("Done.")
+
+    # train_loader = torch.utils.data.DataLoader(train_set, batch_size=1, shuffle=True, num_workers=8, pin_memory=True)
+    # test_loader = torch.utils.data.DataLoader(test_set, batch_size=1, shuffle=False, num_workers=8, pin_memory=True)
+
+    image_set = prepare_image(datapath=args.total_image_path)
+    image_loader = torch.utils.data.DataLoader(image_set, batch_size=1, shuffle=False, num_workers=8, pin_memory=True)
 
     # Model declaration
     net = Hierarchical_Descriptive_Model(nhidden=args.mps_feature_len,
-                 n_object_cats=train_set.num_object_classes, 
-                 n_predicate_cats=train_set.num_predicate_classes, 
-                 n_vocab=train_set.voc_size,
-                 voc_sign=train_set.voc_sign,
-                 max_word_length=train_set.max_size, 
+                 n_object_cats=5,
+                 n_predicate_cats=5,
+                 n_vocab=5,
+                 voc_sign=5,
+                 max_word_length=5,
                  MPS_iter=args.MPS_iter, 
                  use_language_loss=not args.disable_language_model,
-                 object_loss_weight=train_set.inverse_weight_object, 
-                 predicate_loss_weight=train_set.inverse_weight_predicate,
+                 object_loss_weight=5,
+                 predicate_loss_weight=5,
                  dropout=args.dropout, 
                  use_kmeans_anchors=not args.use_normal_anchors, 
                  gate_width = args.gate_width, 
@@ -178,59 +183,60 @@ def main():
     top_Ns = [50, 100]
     best_recall = np.zeros(len(top_Ns))
 
+    extract_features(image_loader, net)
 
-    if args.evaluate:
-        recall = test(test_loader, net, top_Ns)
-        print('======= Testing Result =======') 
-        for idx, top_N in enumerate(top_Ns):
-            print('[Recall@{top_N:d}] {recall:2.3f}%% (best: {best_recall:2.3f}%%)'.format(
-                top_N=top_N, recall=recall[idx] * 100, best_recall=best_recall[idx] * 100))
-
-        print('==============================')
-    else:
-        for epoch in range(0, args.max_epoch):
-            # Training
-            train(train_loader, target_net, optimizer, epoch)
-            # snapshot the state
-            save_name = os.path.join(args.output_dir, '{}_epoch_{}.h5'.format(args.model_name, epoch))
-            network.save_net(save_name, net)
-            print('save model: {}'.format(save_name))
-
-
-            # Testing
-            # network.set_trainable(net, False) # Without backward(), requires_grad takes no effect
-
-            recall = test(test_loader, net, top_Ns)
-
-            if np.all(recall > best_recall):
-                best_recall = recall
-                save_name = os.path.join(args.output_dir, '{}_best.h5'.format(args.model_name))
-                network.save_net(save_name, net)
-                print('\nsave model: {}'.format(save_name))
-
-            print('Epoch[{epoch:d}]:'.format(epoch = epoch)), 
-            for idx, top_N in enumerate(top_Ns):
-                print('\t[Recall@{top_N:d}] {recall:2.3f}%% (best: {best_recall:2.3f}%%)'.format(
-                    top_N=top_N, recall=recall[idx] * 100, best_recall=best_recall[idx] * 100)),
-
-            # updating learning policy
-            if epoch % args.step_size == 0 and epoch > 0:
-                lr /= 10
-                args.lr = lr
-                print '[learning rate: {}]'.format(lr)
-            
-                args.enable_clip_gradient = False
-                if not args.finetune_language_model:
-                    args.train_all = True
-                    optimizer_select = 2
-                # update optimizer and correponding requires_grad state   
-                optimizer = network.get_optimizer(lr, optimizer_select, args, 
-                            vgg_features_var, rpn_features, hdn_features, language_features)
+    # if args.evaluate:
+    #     recall = test(test_loader, net, top_Ns)
+    #     print('======= Testing Result =======')
+    #     for idx, top_N in enumerate(top_Ns):
+    #         print('[Recall@{top_N:d}] {recall:2.3f}%% (best: {best_recall:2.3f}%%)'.format(
+    #             top_N=top_N, recall=recall[idx] * 100, best_recall=best_recall[idx] * 100))
+    #
+    #     print('==============================')
+    # else:
+    #     for epoch in range(0, args.max_epoch):
+    #         # Training
+    #         train(train_loader, target_net, optimizer, epoch)
+    #         # snapshot the state
+    #         save_name = os.path.join(args.output_dir, '{}_epoch_{}.h5'.format(args.model_name, epoch))
+    #         network.save_net(save_name, net)
+    #         print('save model: {}'.format(save_name))
+    #
+    #
+    #         # Testing
+    #         # network.set_trainable(net, False) # Without backward(), requires_grad takes no effect
+    #
+    #         recall = test(test_loader, net, top_Ns)
+    #
+    #         if np.all(recall > best_recall):
+    #             best_recall = recall
+    #             save_name = os.path.join(args.output_dir, '{}_best.h5'.format(args.model_name))
+    #             network.save_net(save_name, net)
+    #             print('\nsave model: {}'.format(save_name))
+    #
+    #         print('Epoch[{epoch:d}]:'.format(epoch = epoch)),
+    #         for idx, top_N in enumerate(top_Ns):
+    #             print('\t[Recall@{top_N:d}] {recall:2.3f}%% (best: {best_recall:2.3f}%%)'.format(
+    #                 top_N=top_N, recall=recall[idx] * 100, best_recall=best_recall[idx] * 100)),
+    #
+    #         # updating learning policy
+    #         if epoch % args.step_size == 0 and epoch > 0:
+    #             lr /= 10
+    #             args.lr = lr
+    #             print '[learning rate: {}]'.format(lr)
+    #
+    #             args.enable_clip_gradient = False
+    #             if not args.finetune_language_model:
+    #                 args.train_all = True
+    #                 optimizer_select = 2
+    #             # update optimizer and correponding requires_grad state
+    #             optimizer = network.get_optimizer(lr, optimizer_select, args,
+    #                         vgg_features_var, rpn_features, hdn_features, language_features)
 
         
 
 
-
+'''
 def train(train_loader, target_net, optimizer, epoch):
     global args
     # Overall loss logger
@@ -381,6 +387,20 @@ def test(test_loader, net, top_Ns):
 
     return recall
 
+'''
+
+def extract_features(image_loaders, net):
+    from tqdm import tqdm
+    global args
+
+    print("======Extract Features======")
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    net.eval()
+    feature_path = args.total_feature_dir
+    for i, (im_data, im_info, im_name) in tqdm(enumerate(image_loaders)):
+        im_data = im_data.to(device)
+        net.extract_features(im_data, im_info, im_name, True, feature_path)
 
 if __name__ == '__main__':
     main()

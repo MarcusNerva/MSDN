@@ -174,8 +174,8 @@ __C.TRAIN.RPN_NMS_THRESH_REGION = 0.75
 __C.TRAIN.RPN_PRE_NMS_TOP_N = 12000
 __C.TRAIN.RPN_PRE_NMS_TOP_N_REGION = 6000
 # Number of top scoring boxes to keep after applying NMS to RPN proposals
-__C.TRAIN.RPN_POST_NMS_TOP_N = 2000
-__C.TRAIN.RPN_POST_NMS_TOP_N_REGION = 2000
+__C.TRAIN.RPN_POST_NMS_TOP_N = 5
+__C.TRAIN.RPN_POST_NMS_TOP_N_REGION = 5
 # Proposal height and width both need to be greater than RPN_MIN_SIZE (at orig image scale)
 __C.TRAIN.RPN_MIN_SIZE = 16
 __C.TRAIN.RPN_MIN_SIZE_REGION = 32
